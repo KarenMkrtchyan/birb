@@ -1,5 +1,5 @@
-import os
-import cv2
+import time
+from picamera2 import Picamera2
 from detect import bird_detection_result
 from stream import BirdWatchQueue
 
@@ -15,19 +15,20 @@ def main():
     amqp_url = "amqps://aagqarjc:Vrbywwd09gaR-V7RuMFfkmzI2--i7TrO@duck.lmq.cloudamqp.com/aagqarjc"
 
     bird_watch_queue = BirdWatchQueue(amqp_url)
-    cam_index = int(os.environ.get("CAMERA_INDEX", "0"))
-    cap = cv2.VideoCapture(cam_index)
+
+    picam2 = Picamera2()
+    config = picam2.create_still_configuration(
+        main={"size": (640, 480), "format": "RGB888"}
+    )
+    picam2.configure(config)
+    picam2.start()
+    time.sleep(2)  # camera warm-up
 
     try:
-        if not cap.isOpened():
-            raise SystemExit(f"Could not open camera index {cam_index}")
-
         frame_i = 0
         try:
             while True:
-                ok, frame = cap.read()
-                if not ok:
-                    break
+                frame = picam2.capture_array()
 
                 frame_i += 1
                 if frame_i % FRAME_STRIDE != 0:
@@ -39,7 +40,7 @@ def main():
         except KeyboardInterrupt:
             pass
     finally:
-        cap.release()
+        picam2.stop()
         bird_watch_queue.close()
 
 
