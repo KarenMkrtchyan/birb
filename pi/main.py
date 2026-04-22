@@ -1,4 +1,5 @@
 import os
+import time
 
 import cv2
 
@@ -7,6 +8,7 @@ from stream import BirdWatchQueue
 
 # Run inference every Nth frame to limit CPU on the Pi.
 FRAME_STRIDE = 5
+PI_STATE_INTERVAL_SEC = 5
 
 
 def main():
@@ -23,12 +25,19 @@ def main():
         if not cap.isOpened():
             raise SystemExit(f"Could not open camera index {cam_index}")
 
+        bird_watch_queue.push_pi_state_on()
+        last_state_push = time.monotonic()
         frame_i = 0
         try:
             while True:
                 ok, frame = cap.read()
                 if not ok:
                     break
+
+                now = time.monotonic()
+                if now - last_state_push >= PI_STATE_INTERVAL_SEC:
+                    bird_watch_queue.push_pi_state_on()
+                    last_state_push = now
 
                 frame_i += 1
                 if frame_i % FRAME_STRIDE != 0:
