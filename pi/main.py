@@ -1,7 +1,5 @@
 import os
-
 import cv2
-
 from detect import bird_detection_result
 from stream import BirdWatchQueue
 
@@ -11,14 +9,15 @@ FRAME_STRIDE = 5
 
 def main():
     """
-    Connects to the RabbitMQ queue, checks each frame for bird. if bird exists pushes frame to queue
+    Connects to the RabbitMQ queue, checks each frame for bird.
+    If bird exists, pushes frame + bounding box data to queue.
     """
-    
     amqp_url = "amqps://aagqarjc:Vrbywwd09gaR-V7RuMFfkmzI2--i7TrO@duck.lmq.cloudamqp.com/aagqarjc"
-   
+
     bird_watch_queue = BirdWatchQueue(amqp_url)
     cam_index = int(os.environ.get("CAMERA_INDEX", "0"))
     cap = cv2.VideoCapture(cam_index)
+
     try:
         if not cap.isOpened():
             raise SystemExit(f"Could not open camera index {cam_index}")
@@ -34,9 +33,9 @@ def main():
                 if frame_i % FRAME_STRIDE != 0:
                     continue
 
-                present, confidence = bird_detection_result(frame)
+                present, confidence, detections = bird_detection_result(frame)
                 if present:
-                    bird_watch_queue.push_frame(frame, confidence)
+                    bird_watch_queue.push_frame(frame, confidence, detections)
         except KeyboardInterrupt:
             pass
     finally:
