@@ -7,9 +7,15 @@ from datetime import datetime
 
 class BirdWatchQueue:
 
-    def __init__(self, url: str, queue_name: str = 'birdwatch_detections'):
+    def __init__(
+        self,
+        url: str,
+        queue_name: str = 'birdwatch_detections',
+        state_queue_name: str = 'birdwatch_pi_state',
+    ):
         self.url = url
         self.queue_name = queue_name
+        self.state_queue_name = state_queue_name
         self.connection = None
         self.channel = None
         self._connect()
@@ -19,7 +25,11 @@ class BirdWatchQueue:
         self.connection = pika.BlockingConnection(params)
         self.channel = self.connection.channel()
         self.channel.queue_declare(queue=self.queue_name, durable=True)
-        print(f"Connected to RabbitMQ queue: {self.queue_name}")
+        self.channel.queue_declare(queue=self.state_queue_name, durable=True)
+        print(
+            f"Connected to RabbitMQ queues: {self.queue_name}, "
+            f"{self.state_queue_name}"
+        )
 
     def _ensure_connection(self):
         try:
@@ -51,6 +61,20 @@ class BirdWatchQueue:
             properties=pika.BasicProperties(delivery_mode=2)
         )
         print(f"Bird detected (conf={confidence:.2f}) — frame pushed at {datetime.now().isoformat()}")
+
+    def push_pi_state_on(self):
+        self._ensure_connection()
+        payload = json.dumps({
+            'state': 'on',
+            'timestamp': datetime.now().isoformat(),
+        })
+        self.channel.basic_publish(
+            exchange='',
+            routing_key=self.state_queue_name,
+            body=payload,
+            properties=pika.BasicProperties(delivery_mode=2),
+        )
+        print('on')
 
     def close(self):
         if self.connection and not self.connection.is_closed:
