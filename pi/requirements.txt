@@ -1,0 +1,4 @@
+tflite-runtime
+pika
+opencv-python-headless
+numpy

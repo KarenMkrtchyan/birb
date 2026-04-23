@@ -1,8 +1,5 @@
-import os
 import time
-
-import cv2
-
+from picamera2 import Picamera2
 from detect import bird_detection_result
 from stream import BirdWatchQueue
 
@@ -13,26 +10,26 @@ PI_STATE_INTERVAL_SEC = 5
 
 def main():
     """
-    Connects to the RabbitMQ queue, checks each frame for bird. if bird exists pushes frame to queue
+    Connects to the RabbitMQ queue, checks each frame for bird.
+    If bird exists, pushes frame + bounding box data to queue.
     """
-    
     amqp_url = "amqps://aagqarjc:Vrbywwd09gaR-V7RuMFfkmzI2--i7TrO@duck.lmq.cloudamqp.com/aagqarjc"
-   
-    bird_watch_queue = BirdWatchQueue(amqp_url)
-    cam_index = int(os.environ.get("CAMERA_INDEX", "0"))
-    cap = cv2.VideoCapture(cam_index)
-    try:
-        if not cap.isOpened():
-            raise SystemExit(f"Could not open camera index {cam_index}")
 
-        bird_watch_queue.push_pi_state_on()
-        last_state_push = time.monotonic()
+    bird_watch_queue = BirdWatchQueue(amqp_url)
+
+    picam2 = Picamera2()
+    config = picam2.create_still_configuration(
+        main={"size": (640, 480), "format": "RGB888"}
+    )
+    picam2.configure(config)
+    picam2.start()
+    time.sleep(2)  # camera warm-up
+
+    try:
         frame_i = 0
         try:
             while True:
-                ok, frame = cap.read()
-                if not ok:
-                    break
+                frame = picam2.capture_array()
 
                 now = time.monotonic()
                 if now - last_state_push >= PI_STATE_INTERVAL_SEC:
@@ -43,13 +40,13 @@ def main():
                 if frame_i % FRAME_STRIDE != 0:
                     continue
 
-                present, confidence = bird_detection_result(frame)
+                present, confidence, detections = bird_detection_result(frame)
                 if present:
-                    bird_watch_queue.push_frame(frame, confidence)
+                    bird_watch_queue.push_frame(frame, confidence, detections)
         except KeyboardInterrupt:
             pass
     finally:
-        cap.release()
+        picam2.stop()
         bird_watch_queue.close()
 
 

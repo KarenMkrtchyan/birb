@@ -1,4 +1,3 @@
-# queue_client.py
 import pika
 import base64
 import json
@@ -41,7 +40,7 @@ class BirdWatchQueue:
             print("Connection lost, reconnecting...")
             self._connect()
 
-    def push_frame(self, frame, confidence: float):
+    def push_frame(self, frame, confidence: float, detections: list = None):
         self._ensure_connection()
 
         _, buffer = cv2.imencode(
@@ -52,6 +51,7 @@ class BirdWatchQueue:
             'timestamp': datetime.now().isoformat(),
             'confidence': confidence,
             'image': image_b64,
+            'detections': detections or [],
         })
 
         self.channel.basic_publish(
@@ -60,7 +60,7 @@ class BirdWatchQueue:
             body=payload,
             properties=pika.BasicProperties(delivery_mode=2)
         )
-        print(f"Frame pushed to queue at {datetime.now().isoformat()}")
+        print(f"Bird detected (conf={confidence:.2f}) — frame pushed at {datetime.now().isoformat()}")
 
     def push_pi_state_on(self):
         self._ensure_connection()
