@@ -1,16 +1,33 @@
-# app.py
 import pika
 import json
-from flask import Flask, jsonify, render_template
+from google import genai
+from flask import Flask, jsonify, render_template, request
 from classifier import BirdClassifier
 from store import DetectionStore
 
-# ------- config -------
-CLOUDAMQP_URL = 'YOUR_CLOUDAMQP_URL'
+# configs
+CLOUDAMQP_URL = 'amqps://aagqarjc:Vrbywwd09gaR-V7RuMFfkmzI2--i7TrO@duck.lmq.cloudamqp.com/aagqarjc'
 QUEUE_NAME = 'birdwatch_detections'
-# ----------------------
+GEMINI_API_KEY = 'AIzaSyCUucncxdVCMotlEzQXRgWFMf0J18yV7dQ'
 
-app = Flask(__name__)
+gemini = genai.Client(api_key=GEMINI_API_KEY)
+facts_cache = {}
+
+def get_bird_facts(species: str) -> str:
+    if species in facts_cache:
+        return facts_cache[species]
+    try:
+        response = gemini.models.generate_content(
+            model='gemini-2.5-flash-lite',
+            contents=f"Give me 2-3 interesting facts about the {species} in 2-3 short sentences. Be concise and engaging."
+        )
+        facts_cache[species] = response.text.strip()
+        return facts_cache[species]
+    except Exception as e:
+        print(f"Gemini error: {e}")
+        return ""
+
+app = Flask(__name__, template_folder='../frontend')
 store = DetectionStore(max_size=100)
 classifier = BirdClassifier()
 
@@ -48,6 +65,7 @@ def poll():
             'species_confidence': classification['score'],
             'top_3': classification['top_3'],
             'image': data['image'],
+            'facts': get_bird_facts(classification['species']),
         }
 
         store.add(detection)
@@ -64,7 +82,29 @@ def poll():
 
 @app.route('/detections')
 def get_detections():
-    return jsonify(store.get_all())
+    date = request.args.get('date')
+    all_detections = store.get_all()
+    if date:
+        all_detections = [d for d in all_detections if d['timestamp'].startswith(date)]
+    return jsonify(all_detections)
+
+@app.route('/calendar')
+def get_calendar():
+    counts = {}
+    for d in store.get_all():
+        day = d['timestamp'][:10]
+        counts[day] = counts.get(day, 0) + 1
+    return jsonify(counts)
+
+@app.route('/detections/<int:detection_id>', methods=['DELETE'])
+def delete_detection(detection_id):
+    store.delete(detection_id)
+    return jsonify({'status': 'ok'})
+
+@app.route('/detections', methods=['DELETE'])
+def clear_detections():
+    store.clear()
+    return jsonify({'status': 'ok'})
 
 @app.route('/latest')
 def get_latest():
@@ -78,4 +118,4 @@ def dashboard():
     return render_template('dashboard.html')
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5001)

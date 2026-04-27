@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BirdWatch</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    {% raw %}
+    const { useState, useEffect, useRef } = React;
+
+    const POLL_INTERVAL = 1000;
+
+    function timeAgo(isoString) {
+      const diff = Math.floor((Date.now() - new Date(isoString)) / 1000);
+      if (diff < 60) return `${diff}s ago`;
+      if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+      return `${Math.floor(diff / 3600)}h ago`;
+    }
+
+    function BirdWatchDashboard() {
+      const [detections, setDetections] = useState([]);
+      const [status, setStatus] = useState("disconnected");
+      const [live, setLive] = useState(false);
+      const [flaskUrl, setFlaskUrl] = useState("http://localhost:5001");
+      const [calendarCounts, setCalendarCounts] = useState({});
+      const [selectedDate, setSelectedDate] = useState(null);
+      const [calendarMonth, setCalendarMonth] = useState(new Date());
+      const intervalRef = useRef(null);
+
+      const visibleDetections = selectedDate
+        ? detections.filter(d => d.timestamp.startsWith(selectedDate))
+        : detections;
+
+      const latest = visibleDetections[0];
+      const uniqueSpecies = new Set(visibleDetections.map((d) => d.species)).size;
+
+      const speciesCount = visibleDetections.reduce((acc, d) => {
+        acc[d.species] = (acc[d.species] || 0) + 1;
+        return acc;
+      }, {});
+      const topSpecies = Object.entries(speciesCount).sort((a, b) => b[1] - a[1]).slice(0, 4);
+
+      useEffect(() => {
+        if (!live) {
+          clearInterval(intervalRef.current);
+          return;
+        }
+        fetch(`${flaskUrl}/detections`)
+          .then(r => r.json())
+          .then(data => setDetections(data))
+          .catch(() => {});
+        fetch(`${flaskUrl}/calendar`)
+          .then(r => r.json())
+          .then(data => setCalendarCounts(data))
+          .catch(() => {});
+        intervalRef.current = setInterval(async () => {
+          setStatus("polling");
+          try {
+            const res = await fetch(`${flaskUrl}/poll`);
+            const data = await res.json();
+            if (data.status === "new") {
+              setDetections((prev) => [data.detection, ...prev].slice(0, 100));
+              setCalendarCounts((prev) => {
+                const day = data.detection.timestamp.slice(0, 10);
+                return { ...prev, [day]: (prev[day] || 0) + 1 };
+              });
+              setStatus("connected");
+            } else {
+              setStatus("connected");
+            }
+          } catch {
+            setStatus("error");
+          }
+        }, POLL_INTERVAL);
+        return () => clearInterval(intervalRef.current);
+      }, [live, flaskUrl]);
+
+      function calendarDays() {
+        const year = calendarMonth.getFullYear();
+        const month = calendarMonth.getMonth();
+        const firstDay = new Date(year, month, 1).getDay();
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const days = [];
+        for (let i = 0; i < firstDay; i++) days.push(null);
+        for (let d = 1; d <= daysInMonth; d++) days.push(d);
+        return days;
+      }
+
+      function dateStr(day) {
+        const y = calendarMonth.getFullYear();
+        const m = String(calendarMonth.getMonth() + 1).padStart(2, '0');
+        return `${y}-${m}-${String(day).padStart(2, '0')}`;
+      }
+
+      const statusDot = {
+        connected: "bg-emerald-500",
+        polling: "bg-amber-400 animate-pulse",
+        disconnected: "bg-stone-400",
+        error: "bg-red-500",
+      }[status];
+
+      return (
+        <div className="min-h-screen" style={{ background: "#fdf8f3", fontFamily: "'Georgia', serif" }}>
+          <div className="max-w-3xl mx-auto px-6 py-12">
+
+            <div className="flex items-center justify-between mb-10">
+              <div>
+                <h1 className="text-3xl font-bold text-stone-800" style={{ letterSpacing: "-0.02em" }}>
+                  🪶 BirdWatch
+                </h1>
+                <p className="text-stone-400 text-sm mt-0.5">Real-time bird detection</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${statusDot}`} />
+                <span className="text-stone-400 text-xs font-mono capitalize">{status}</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4 mb-8">
+              {[
+                { label: "Sightings", value: detections.length },
+                { label: "Species", value: uniqueSpecies },
+                { label: "Latest", value: latest?.species?.split(" ").slice(-1)[0] ?? "—" },
+              ].map(({ label, value }) => (
+                <div key={label} className="rounded-2xl p-5 text-center" style={{ background: "#f5ede0" }}>
+                  <p className="text-2xl font-bold text-stone-700">{value}</p>
+                  <p className="text-xs text-stone-400 mt-0.5 uppercase tracking-wider">{label}</p>
+                </div>
+              ))}
+            </div>
+
+            {latest && (
+              <div className="rounded-2xl overflow-hidden mb-8" style={{ background: "#f5ede0" }}>
+                {latest.image ? (
+                  <img
+                    src={`data:image/jpeg;base64,${latest.image}`}
+                    alt={latest.species}
+                    className="w-full object-contain"
+                  />
+                ) : (
+                  <div className="w-full h-56 flex items-center justify-center" style={{ background: "#ece0d0" }}>
+                    <span className="text-7xl opacity-40">🐦</span>
+                  </div>
+                )}
+                <div className="p-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xl font-bold text-stone-800">{latest.species}</p>
+                      <p className="text-stone-400 text-sm mt-0.5">
+                        {Math.round((latest.species_confidence ?? latest.confidence) * 100)}% confidence
+                        · {timeAgo(latest.timestamp)}
+                      </p>
+                    </div>
+                    <span className="text-xs font-semibold uppercase tracking-widest text-amber-700 bg-amber-100 px-3 py-1 rounded-full">
+                      Latest
+                    </span>
+                  </div>
+
+                  <div className="mt-4 h-1.5 rounded-full bg-stone-200">
+                    <div
+                      className="h-1.5 rounded-full bg-amber-500 transition-all duration-700"
+                      style={{ width: `${Math.round((latest.species_confidence ?? latest.confidence) * 100)}%` }}
+                    />
+                  </div>
+
+                  {latest.facts && (
+                    <p className="mt-4 text-stone-500 text-sm leading-relaxed">{latest.facts}</p>
+                  )}
+
+                  {latest.top_3 && (
+                    <div className="mt-4 space-y-2">
+                      <p className="text-xs uppercase tracking-wider text-stone-400">Other possibilities</p>
+                      {latest.top_3.map((r, i) => (
+                        <div key={i} className="flex items-center gap-3">
+                          <span className="text-stone-300 text-xs w-3">{i + 1}</span>
+                          <span className="text-stone-600 text-sm flex-1">{r.species}</span>
+                          <span className="text-stone-400 text-xs font-mono">{Math.round(r.score * 100)}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="rounded-2xl p-5 mb-8" style={{ background: "#f5ede0" }}>
+              <div className="flex items-center justify-between mb-4">
+                <button onClick={() => setCalendarMonth(m => new Date(m.getFullYear(), m.getMonth() - 1))} className="text-stone-400 hover:text-stone-600 px-2">‹</button>
+                <p className="text-sm font-medium text-stone-700">
+                  {calendarMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}
+                </p>
+                <button onClick={() => setCalendarMonth(m => new Date(m.getFullYear(), m.getMonth() + 1))} className="text-stone-400 hover:text-stone-600 px-2">›</button>
+              </div>
+              <div className="grid grid-cols-7 gap-1 text-center mb-1">
+                {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => (
+                  <p key={d} className="text-xs text-stone-400">{d}</p>
+                ))}
+              </div>
+              <div className="grid grid-cols-7 gap-1 text-center">
+                {calendarDays().map((day, i) => {
+                  if (!day) return <div key={i} />;
+                  const ds = dateStr(day);
+                  const count = calendarCounts[ds] || 0;
+                  const isSelected = selectedDate === ds;
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => setSelectedDate(isSelected ? null : ds)}
+                      className="rounded-lg py-1.5 text-xs font-medium transition-colors relative"
+                      style={{
+                        background: isSelected ? "#d97706" : count > 0 ? "#ece0d0" : "transparent",
+                        color: isSelected ? "white" : count > 0 ? "#92400e" : "#a8a29e",
+                      }}
+                    >
+                      {day}
+                      {count > 0 && !isSelected && (
+                        <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-amber-500" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedDate && (
+                <p className="text-xs text-center text-stone-400 mt-3">
+                  Showing {visibleDetections.length} sighting{visibleDetections.length !== 1 ? 's' : ''} on {selectedDate} · <button onClick={() => setSelectedDate(null)} className="text-amber-600 hover:underline">clear</button>
+                </p>
+              )}
+            </div>
+
+            <div className="mb-8">
+              <p className="text-xs uppercase tracking-wider text-stone-400 mb-3">Top Species</p>
+              <div className="space-y-2">
+                {topSpecies.map(([name, count]) => (
+                  <div key={name} className="flex items-center gap-4 rounded-xl px-4 py-3" style={{ background: "#f5ede0" }}>
+                    <span className="text-stone-700 text-sm flex-1">{name}</span>
+                    <span className="text-amber-700 text-sm font-mono font-semibold">×{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="mb-10">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs uppercase tracking-wider text-stone-400">Recent Sightings</p>
+                {detections.length > 0 && (
+                  <button
+                    onClick={async () => {
+                      await fetch(`${flaskUrl}/detections`, { method: 'DELETE' });
+                      setDetections([]);
+                    }}
+                    className="text-xs px-3 py-1 rounded-lg font-medium text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+              <div className="space-y-3">
+                {visibleDetections.map((d, i) => (
+                  <div key={d.id ?? i} className="rounded-2xl overflow-hidden" style={{ background: "#f5ede0" }}>
+                    {d.image && (
+                      <img
+                        src={`data:image/jpeg;base64,${d.image}`}
+                        alt={d.species}
+                        className="w-full object-contain h-40"
+                      />
+                    )}
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-stone-700 text-sm font-medium">{d.species}</p>
+                        <p className="text-stone-400 text-xs mt-0.5">
+                          {Math.round((d.species_confidence ?? d.confidence) * 100)}% match
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-stone-400 text-xs font-mono">{timeAgo(d.timestamp)}</span>
+                        <button
+                          onClick={async () => {
+                            await fetch(`${flaskUrl}/detections/${d.id}`, { method: 'DELETE' });
+                            setDetections((prev) => prev.filter((_, j) => j !== i));
+                          }}
+                          className="text-stone-300 hover:text-red-400 transition-colors text-xs"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl p-5 space-y-3" style={{ background: "#f5ede0" }}>
+              <p className="text-xs uppercase tracking-wider text-stone-400">Connection</p>
+              <div className="flex items-center gap-3">
+                <input
+                  value={flaskUrl}
+                  onChange={(e) => setFlaskUrl(e.target.value)}
+                  disabled={live}
+                  className="flex-1 text-xs px-3 py-2 rounded-lg bg-white border border-stone-200 text-stone-600 font-mono focus:outline-none focus:border-amber-400"
+                  placeholder="http://localhost:5001"
+                />
+                <button
+                  onClick={() => setLive((v) => !v)}
+                  className="text-xs px-4 py-2 rounded-lg font-medium transition-colors"
+                  style={{
+                    background: live ? "#e7ddd3" : "#d97706",
+                    color: live ? "#57534e" : "white",
+                  }}
+                >
+                  {live ? "Disconnect" : "Connect"}
+                </button>
+              </div>
+            </div>
+
+            <p className="text-center text-stone-300 text-xs font-mono mt-8">
+              BirdWatch · EE250 · polling every {POLL_INTERVAL / 1000}s
+            </p>
+
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<BirdWatchDashboard />);
+    {% endraw %}
+  </script>
+</body>
+</html>
