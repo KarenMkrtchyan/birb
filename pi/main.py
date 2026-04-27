@@ -28,6 +28,7 @@ def main():
     try:
         frame_i = 0
         last_send = 0
+        last_state_push = 0
         try:
             while True:
                 frame = picam2.capture_array()
