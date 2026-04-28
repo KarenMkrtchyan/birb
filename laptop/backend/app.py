@@ -1,5 +1,6 @@
 import pika
 import json
+import time
 from google import genai
 from flask import Flask, jsonify, render_template, request
 from classifier import BirdClassifier
@@ -8,7 +9,11 @@ from store import DetectionStore
 # configs
 CLOUDAMQP_URL = 'amqps://aagqarjc:Vrbywwd09gaR-V7RuMFfkmzI2--i7TrO@duck.lmq.cloudamqp.com/aagqarjc'
 QUEUE_NAME = 'birdwatch_detections'
-GEMINI_API_KEY = 'AIzaSyCUucncxdVCMotlEzQXRgWFMf0J18yV7dQ'
+PI_STATE_QUEUE = 'birdwatch_pi_state'
+PI_TIMEOUT_SEC = 12
+
+last_pi_msg = 0
+GEMINI_API_KEY = 'AIzaSyDwYXDAHmCTWDyCpQ6ESxQvZKhsj__361E'
 
 gemini = genai.Client(api_key=GEMINI_API_KEY)
 facts_cache = {}
@@ -40,7 +45,7 @@ def get_channel():
 
 @app.route('/poll')
 def poll():
-    """Pull one message from queue, classify it, store it"""
+    # Pull one message from queue
     try:
         connection, channel = get_channel()
         method, _, body = channel.basic_get(
@@ -79,6 +84,25 @@ def poll():
     except Exception as e:
         print(f"Poll error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/pi_status')
+def pi_status():
+    global last_pi_msg
+    try:
+        params = pika.URLParameters(CLOUDAMQP_URL)
+        connection = pika.BlockingConnection(params)
+        channel = connection.channel()
+        channel.queue_declare(queue=PI_STATE_QUEUE, durable=True)
+        while True:
+            method, _, body = channel.basic_get(queue=PI_STATE_QUEUE, auto_ack=True)
+            if method is None:
+                break
+            last_pi_msg = time.time()
+        connection.close()
+    except Exception:
+        pass
+    online = (time.time() - last_pi_msg) < PI_TIMEOUT_SEC
+    return jsonify({'online': online})
 
 @app.route('/detections')
 def get_detections():

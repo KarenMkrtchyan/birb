@@ -7,7 +7,6 @@ from transformers import pipeline
 class BirdClassifier:
     def __init__(self):
         print("Loading bird classifier")
-        # this model is fine-tuned on NABirds - 400 North American species
         self.pipe = pipeline(
             task='image-classification',
             model='chriamue/bird-species-classifier',
